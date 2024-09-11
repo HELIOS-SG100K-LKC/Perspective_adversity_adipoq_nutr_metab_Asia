@@ -1,0 +1,454 @@
+########Figure for Adversity, adiposity, nutrition, and metabolic wellbeing in Asia 
+
+# Note to user:
+# Please refer to the citations for the information regarding the publicly available data.
+# Although some data are publicly available, we are not at liberty to reproduce parts of these information.
+# Please email theresia.hm@ntu.edu.sg should you need help in locating this publicly available data.
+# Please contact the UK Biobank directly, or reach out to the HELIOSSG100K Study should you need to access these data.
+
+library(tidyverse)
+library(ggplot2) 
+library(wesanderson)
+
+### Figure 1a to illustrate proportion of death by CVD across global regions 1990-2019
+# Use Prevalence from latest GBD data 2021
+setwd("")
+gbd_2021_death <- readxl::read_excel("IHME_GBD_2021_MORTALITY_1990_2021_SR_TABLE_1_Y2024M04D03.xlsx")
+
+colnames(gbd_2021_death) <- unlist(gbd_2021_death[1, ])
+
+gbd_2021_death_mini <- gbd_2021_death %>% slice(.,-1) %>% select (-contains("ASMR")) %>%
+  dplyr::rename(death_1990=4,death_2010=5,death_2019=6,death_2020=7,death_2021=8) %>%
+  mutate(across(starts_with("death_"), ~ gsub("[\\(\\)\\-]", "|", .))) %>%
+  mutate(across(starts_with("death_"), ~ gsub(" ", "", .))) %>%
+  filter (location_type=="Global" | location_type=="Region") %>%
+  filter (.,grepl('Global|Europe|Asia', location_name)) %>%
+  separate(death_1990, c("death_1990_num","death_1990_lci","death_1990_uci"), sep = '\\|') %>%
+  separate(death_2010, c("death_2010_num","death_2010_lci","death_2010_uci"), sep = '\\|') %>%
+  separate(death_2019, c("death_2019_num","death_2019_lci","death_2019_uci"), sep = '\\|') %>%
+  separate(death_2020, c("death_2020_num","death_2020_lci","death_2020_uci"), sep = '\\|') %>%
+  separate(death_2021, c("death_2021_num","death_2021_lci","death_2021_uci"), sep = '\\|') %>%
+  mutate(across(matches("death"), as.numeric))
+
+gbd_2021_death_mini_allcause <- gbd_2021_death_mini %>% 
+  dplyr::filter (.,!grepl('COVID-19', cause_name)) %>%
+  dplyr::select (location_name,contains("num")) %>%
+  dplyr::group_by (location_name) %>%
+  dplyr::summarize(across(everything(), sum)) 
+
+gbd_2021_death_mini_cvd <- gbd_2021_death_mini %>% 
+  dplyr::filter (.,grepl('heart|mitr|hemor|rheu|stroke|isch|valv|card|fibril|hypertens|aorti|aneur|arte|pulmo', cause_name)) %>%
+  dplyr::filter (.,!grepl('kidney|mater|congen|lung|anomal', cause_name)) %>%
+  dplyr::filter (.,!grepl('Maternal hemorrhage|Maternal hypertensive disorders', cause_name)) %>%
+  dplyr::select (location_name,contains("num")) %>%
+  dplyr::group_by (location_name) %>%
+  dplyr::summarize(across(everything(), sum))
+
+death_allcause_EU <- gbd_2021_death_mini_allcause %>% dplyr::filter (.,grepl('Europe',location_name)) %>%
+  dplyr::select(-location_name) %>%
+  dplyr::summarize(across(everything(), sum)) %>% dplyr::mutate(location_name="Europe")
+death_allcause_Asia<- gbd_2021_death_mini_allcause %>% dplyr::filter (.,grepl('Asia',location_name)) %>%
+  dplyr::select(-location_name) %>%
+  dplyr::summarize(across(everything(), sum)) %>% dplyr::mutate(location_name="Asia")
+death_cvd_EU<- gbd_2021_death_mini_cvd %>% dplyr::filter (.,grepl('Europe',location_name)) %>%
+  dplyr::select(-location_name) %>%
+  dplyr::summarize(across(everything(), sum)) %>% dplyr::mutate(location_name="Europe")
+death_cvd_Asia<- gbd_2021_death_mini_cvd %>% dplyr::filter (.,grepl('Asia',location_name)) %>%
+  dplyr::select(-location_name) %>%
+  dplyr::summarize(across(everything(), sum)) %>% dplyr::mutate(location_name="Asia")
+
+gbd_2021_death_mini_allcause <- bind_rows (gbd_2021_death_mini_allcause,death_allcause_EU,death_allcause_Asia) %>%
+  filter (location_name=="Global"|location_name=="Asia"|location_name=="Europe"|location_name=="South Asia"|location_name=="Southeast Asia") %>%
+  pivot_longer (!location_name, names_to = "year", values_to = "allcause")
+
+gbd_2021_death_mini_cvd <- bind_rows (gbd_2021_death_mini_cvd,death_cvd_EU,death_cvd_Asia) %>%
+  filter (location_name=="Global"|location_name=="Asia"|location_name=="Europe"|location_name=="South Asia"|location_name=="Southeast Asia") %>%
+  pivot_longer (!location_name, names_to = "year", values_to = "cvd")
+
+death_2000 <- gbd_cvd_death_mini %>% filter (year==2000) %>%
+  dplyr::rename(location_name=region,allcause=Allcauses,cvd=Cardiovasculardiseases)
+
+gbd_2021_death_mini_cvdallcause <-  gbd_2021_death_mini_allcause %>%
+  left_join(.,gbd_2021_death_mini_cvd) %>%
+  mutate(year = as.numeric(str_extract(year, "\\d+")))%>%
+  mutate(location_name = str_replace(location_name, "South Asia", "SA")) %>%
+  mutate(location_name = str_replace(location_name, "Southeast Asia", "SEA")) %>%
+  mutate (prop=cvd/allcause*100)
+
+tiff(file="cvd_death_1990_2021_2.tiff",width=4, height=4, units="in", res=300)
+gbd_2021_death_mini_cvdallcause %>%
+  mutate (location_name=fct_relevel(location_name,"Global","Asia","SEA","SA","Europe")) %>%
+  ggplot(aes(x=year,y=prop,group=location_name))+
+  geom_line (aes(linetype=location_name,color=location_name),size=0.5)+
+  geom_point(aes(shape=location_name,color=location_name),size=2.5)+
+  theme_classic() + labs(y="Death, CVD (% Death, all causes)",x="year")+
+  scale_x_continuous(breaks=c(1990,2010,2019,2021),guide = guide_axis(n.dodge = 2)) +
+  theme(legend.position = "top",legend.title=element_blank(),
+        axis.text.x.top = element_blank(),
+        axis.ticks.x.top = element_blank(),
+        axis.line.x.top = element_blank())
+dev.off()
+
+#### Figure 1b, to compare BMI, WHR, and vFMI across ethnicity using UKB data
+data_UKB_metab <- read.csv ("ukb_data_20221004_theresia.csv",fileEncoding="UTF-8-BOM") %>% select (-X)
+
+# Calculate visceral FMI
+# Based on visceral FMI GWAS, reduced model, in male and female separately
+data_UKB_metab <- data_UKB_metab %>% dplyr::rename(ethnic=ethnic_background_f21000_0_0,
+                                                   sex=sex_f31_0_0, age=age_when_attended_assessment_centre_f21003_0_0,
+                                                   menopause=had_menopause_f2724_0_0,
+                                                   waist=waist_circumference_f48_0_0, hip=hip_circumference_f49_0_0,
+                                                   height=standing_height_f50_0_0,weight=weight_f21002_0_0, imp_whole=impedance_of_whole_body_f23106_0_0,
+                                                   imp_leg_r=impedance_of_leg_right_f23107_0_0, imp_leg_l=impedance_of_leg_left_f23108_0_0,
+                                                   imp_arm_r=impedance_of_arm_right_f23109_0_0, imp_arm_l=impedance_of_arm_left_f23110_0_0,
+                                                   vat=vat_visceral_adipose_tissue_mass_f23288_2_0,
+                                                   dbp_auto=diastolic_blood_pressure_automated_reading_f4079_0_0, dbp_man=diastolic_blood_pressure_manual_reading_f94_0_0,
+                                                   hdl=hdl_cholesterol_f30760_0_0,trig=triglycerides_f30870_0_0,HbA1c=glycated_haemoglobin_hba1c_f30750_0_0)
+
+data_UKB_metab_f <- data_UKB_metab %>% filter (sex==0) %>% #0 female, 1 male
+  mutate (vat_pre=(-23.98*waist)+(26.49*hip)+(30.47*weight)+(81.49*imp_arm_l)+(111.3*imp_leg_l)+(-84.79*imp_whole)+
+            (0.1464*age*weight)+(0.7378*waist*weight)+(-0.6726*hip*weight)+
+            (-0.5411*imp_arm_l*height)+(-0.7114*imp_leg_l*height)+(0.5659*imp_whole*height)-2873)
+data_UKB_metab_m <- data_UKB_metab %>% filter (sex==1) %>%
+  mutate (vat_pre=(-16.67*age)+(13.47*waist)+(-53.56*height)+(65.93*weight)+
+            (0.3879*age*weight)+(0.2488*waist*weight)+(-0.4401*hip*weight)+
+            (-0.08245*imp_arm_l*height)+(-0.07416*imp_leg_l*height)+(0.09465*imp_whole*height)+3364) #there is typo in the supplementary
+
+data_UKB_metab_vat <- rbind (data_UKB_metab_f,data_UKB_metab_m)
+
+# Select and collapse ethnicity. Indian also includes Pakistani and Bangladeshi. African means Afro-Caribbean and Black African
+# Collapse WHR, BMI
+data_UKB_metab_vat <- data_UKB_metab_vat %>%
+  select (eid:age,waist:weight,dbp_auto:vat_pre) %>% filter (ethnic >0) %>% # remove do not know, or prefer not to answer
+  filter (ethnic!=2 & ethnic!=2001 & ethnic!=2002 & ethnic!=2003 & ethnic!=2004) %>% # remove mixed ethnicity
+  filter (ethnic!=3 & ethnic!=4 & ethnic!=6 & ethnic!=3004) %>% # remove ethnicity which origins are uncertain
+  mutate(ethnic_rev=ethnic) %>%
+  mutate(ethnic_rev=as.factor(ethnic_rev))%>% 
+  mutate_at(vars(contains('ethnic_rev')),~case_when(.=="5"~"Chinese",
+                                                    .=="1" |. =="1001" | .=="1002" | .=="1003" | .=="1004" ~"European",
+                                                    . =="3001" | .=="3002" | .=="3003" ~"Indian", 
+                                                    . =="4001" | .=="4002" | .=="4003"~"African")) %>%
+  select (ethnic,waist:weight,vat_pre,ethnic_rev) %>% 
+  mutate (BMI=weight/(height/100)^2,vFMI=(vat_pre/1000)/(height/100)^2) %>%
+  filter (vat_pre>0) %>% dplyr::rename (Ethnicity=ethnic_rev) %>%
+  select (Ethnicity,BMI,waist,vFMI)
+
+UKB <- data_UKB_metab_vat %>% pivot_longer (!Ethnicity,names_to="adipoq",values_to="value")%>%
+  group_by (Ethnicity,adipoq) %>% summarise (mean=mean(value),sd=sd(value),n=n()) %>%
+  mutate (sem=sd/sqrt(n), upper_ci=mean+(1.96*sem),lower_ci=mean-(1.96*sem)) %>% filter (Ethnicity!="African")
+
+# Make forest plot
+global_adipoq_forestplot <- UKB %>%
+  ggplot(aes(x=Ethnicity,y=mean, ymin=lower_ci, ymax=upper_ci,shape=Ethnicity)) +
+  geom_pointrange() +  # flip coordinates (puts labels on y axis)
+  scale_shape_manual(values = c(1,2,0))+
+  coord_flip()+ 
+  xlab("") + ylab("mean(95%CI)")+theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  facet_grid(~factor(adipoq,level=c('BMI','waist','vFMI')),scales="free")+
+  theme(legend.position = "top")
+
+ethnic_legend <- cowplot::get_legend(global_adipoq_forestplot) #grab legend
+
+global_adipoq_forestplot_BMI <- UKB %>% filter (adipoq=="BMI") %>% 
+  ggplot(aes(x=Ethnicity,y=mean, ymin=lower_ci, ymax=upper_ci,shape=Ethnicity)) +
+  geom_pointrange(linewidth = 0.5) +  # flip coordinates (puts labels on y axis)
+  scale_shape_manual(values = c(1,2,0))+
+  coord_flip()+ ylim(22,30)+ 
+  xlab("") + ylab("")+theme_classic()+
+  theme(legend.position = "none",axis.title.y=element_blank(), axis.text.y=element_blank()) + ggtitle(bquote('BMI,'~Kg/m^2))
+global_adipoq_forestplot_waist <- UKB %>% filter (adipoq=="waist") %>% 
+  ggplot(aes(x=Ethnicity,y=mean, ymin=lower_ci, ymax=upper_ci,shape=Ethnicity)) +
+  geom_pointrange(linewidth = 0.5) +  # flip coordinates (puts labels on y axis)
+  scale_shape_manual(values = c(1,2,0))+
+  coord_flip()+ ylim(75,100)+ 
+  xlab("") + ylab("")+theme_classic()+
+  theme(legend.position = "none",axis.title.y=element_blank(), axis.text.y=element_blank()) + ggtitle("waist, cm")
+global_adipoq_forestplot_vFMI <- UKB %>% filter (adipoq=="vFMI") %>% 
+  ggplot(aes(x=Ethnicity,y=mean, ymin=lower_ci, ymax=upper_ci,shape=Ethnicity)) +
+  geom_pointrange(linewidth = 0.5) +  # flip coordinates (puts labels on y axis)
+  scale_shape_manual(values = c(1,2,0))+
+  coord_flip()+ xlab("") + ylab("")+theme_classic()+
+  theme(legend.position = "none",axis.title.y=element_blank(), axis.text.y=element_blank()) + ggtitle(bquote('vFMI,'~Kg/m^2))
+global_adipoq_forestplot_comb<- gridExtra::grid.arrange(global_adipoq_forestplot_BMI,global_adipoq_forestplot_waist,global_adipoq_forestplot_vFMI,ncol=3)
+
+tiff(file="global_adipoq_forestplot_2.tiff",
+     width=5, height=3, units="in", res=300)
+gridExtra::grid.arrange(ethnic_legend,global_adipoq_forestplot_comb,heights=c(0.5,4))
+dev.off()
+
+#### Figure 1C was reproduced from the submitted versions of https://www.thelancet.com/article/S2213-8587(24)00195-5/abstract
+
+
+#### Figure 2, disease risk factors contributing to the DALYs of CVD in 2021
+global_dalys <- read.csv ("global_1549yo_bothsex_cvddiab.csv",fileEncoding="UTF-8-BOM") %>%
+  select (cause_name, location_name, metric_name, val, upper, lower) %>%
+  filter (metric_name == "Rate") %>%
+  select (-metric_name)
+
+global_dalys_cvddiab_forestplot <- global_dalys %>%
+  mutate (cause_name=case_when(cause_name=="Cardiovascular diseases"~"CVD",
+                               cause_name=="Diabetes and kidney diseases"~"Diabetes, CKD")) %>%
+  mutate (location_name=fct_relevel(location_name,"Europe","East Asia", "South Asia", "Southeast Asia")) %>%
+  ggplot(aes(x=cause_name,y=val, ymin=lower, ymax=upper,color=location_name,shape=location_name)) +
+  geom_pointrange(position = position_dodge(width = 1), size=1) +
+  scale_color_manual(values= wes_palette("Darjeeling1", n = 4))+
+  scale_shape_manual(values = c(15,16,17,18))+
+  xlab("2021") + ylab("DALYS rate, per 100,000")+theme_classic()+
+  theme(legend.position = "top", legend.title=element_blank())+
+  guides(color=guide_legend(nrow=2,byrow=TRUE))
+
+sea_dalys <- read.csv ("sea_1549yo_bothsex_cvddiab.csv",fileEncoding="UTF-8-BOM") %>%
+  select (Location,Cause.of.death.or.injury:Upper.bound) %>%
+  filter (Measure=="DALYs per 100,000") %>% select (-Measure) %>%
+  filter (Cause.of.death.or.injury=="Cardiovascular diseases") %>%
+  select (-Cause.of.death.or.injury) %>%
+  dplyr::rename (risk_factor=2,lower=4,upper=5) %>%
+  filter (!is.na(Value))
+ea_dalys <- read.csv ("ea_1549yo_bothsex_cvddiab.csv",fileEncoding="UTF-8-BOM") %>%
+  select (Location,Cause.of.death.or.injury:Upper.bound) %>%
+  filter (Measure=="DALYs per 100,000") %>% select (-Measure) %>%
+  filter (Cause.of.death.or.injury=="Cardiovascular diseases") %>%
+  select (-Cause.of.death.or.injury) %>%
+  dplyr::rename (risk_factor=2,lower=4,upper=5) %>%
+  filter (!is.na(Value))
+sa_dalys <- read.csv ("sa_1549yo_bothsex_cvddiab.csv",fileEncoding="UTF-8-BOM") %>%
+  select (Location,Cause.of.death.or.injury:Upper.bound) %>%
+  filter (Measure=="DALYs per 100,000") %>% select (-Measure) %>%
+  filter (Cause.of.death.or.injury=="Cardiovascular diseases") %>%
+  select (-Cause.of.death.or.injury) %>%
+  dplyr::rename (risk_factor=2,lower=4,upper=5) %>%
+  filter (!is.na(Value))
+eu_dalys <- read.csv ("eu_1549yo_bothsex_cvddiab.csv",fileEncoding="UTF-8-BOM") %>%
+  select (Location,Cause.of.death.or.injury:Upper.bound) %>%
+  filter (Measure=="DALYs per 100,000") %>% select (-Measure) %>%
+  filter (Cause.of.death.or.injury=="Cardiovascular diseases") %>%
+  select (-Cause.of.death.or.injury) %>%
+  dplyr::rename (risk_factor=2,lower=4,upper=5) %>%
+  filter (!is.na(Value)) 
+
+global_dalys_riskfactor <- eu_dalys %>% rbind (.,ea_dalys) %>% rbind (.,sa_dalys) %>%
+  rbind (.,sea_dalys)
+
+pal <- wes_palette(9, name = "GrandBudapest2", type = "continuous")
+global_dalys_riskfactor_bar <- global_dalys_riskfactor %>%
+  filter (risk_factor!="Air pollution" &
+            risk_factor!="Non-optimal temperature"&
+            risk_factor!="Other environmental risks") %>% # remove environmental factors
+  filter (Value>0) %>%
+  mutate (risk_factor=case_when(risk_factor=="High body-mass index"~"High BMI",
+                                risk_factor=="High systolic blood pressure"~"High BP",
+                                risk_factor=="High LDL Cholesterol"~"High LDL",
+                                risk_factor=="High fasting plasma glucose"~"High fasting glucose",T~risk_factor)) %>%
+  ggplot (aes(x=Location,y=Value,fill=risk_factor))+
+  geom_bar (stat="Identity", colour="white") + theme_classic () +
+  scale_fill_manual(values= pal)+
+  xlab("Risk factor for CVD, 2021") + ylab("DALYS rate, per 100,000")+
+  coord_flip()+
+  # geom_text(aes(label=paste0(sprintf("%1.1f", Value))),
+  # position=position_stack(vjust=0.5),check_overlap = TRUE)+
+  theme(legend.position = "top", legend.title=element_blank())+
+  guides(fill=guide_legend(nrow=3))
+
+sea_diet <- read.csv ("sea_1549yo_bothsex_cvddiab_diet.csv",fileEncoding="UTF-8-BOM") %>%
+  select (Location,Cause.of.death.or.injury:Upper.bound) %>%
+  filter (Measure=="DALYs per 100,000") %>% select (-Measure) %>%
+  filter (Cause.of.death.or.injury=="Cardiovascular diseases") %>%
+  select (-Cause.of.death.or.injury) %>%
+  dplyr::rename (risk_factor=2,lower=4,upper=5) %>%
+  filter (!is.na(Value))
+ea_diet <- read.csv ("ea_1549yo_bothsex_cvddiab_diet.csv",fileEncoding="UTF-8-BOM") %>%
+  select (Location,Cause.of.death.or.injury:Upper.bound) %>%
+  filter (Measure=="DALYs per 100,000") %>% select (-Measure) %>%
+  filter (Cause.of.death.or.injury=="Cardiovascular diseases") %>%
+  select (-Cause.of.death.or.injury) %>%
+  dplyr::rename (risk_factor=2,lower=4,upper=5) %>%
+  filter (!is.na(Value))
+sa_diet <- read.csv ("sa_1549yo_bothsex_cvddiab_diet.csv",fileEncoding="UTF-8-BOM") %>%
+  select (Location,Cause.of.death.or.injury:Upper.bound) %>%
+  filter (Measure=="DALYs per 100,000") %>% select (-Measure) %>%
+  filter (Cause.of.death.or.injury=="Cardiovascular diseases") %>%
+  select (-Cause.of.death.or.injury) %>%
+  dplyr::rename (risk_factor=2,lower=4,upper=5) %>%
+  filter (!is.na(Value))
+eu_diet <- read.csv ("eu_1549yo_bothsex_cvddiab_diet.csv",fileEncoding="UTF-8-BOM") %>%
+  select (Location,Cause.of.death.or.injury:Upper.bound) %>%
+  filter (Measure=="DALYs per 100,000") %>% select (-Measure) %>%
+  filter (Cause.of.death.or.injury=="Cardiovascular diseases") %>%
+  select (-Cause.of.death.or.injury) %>%
+  dplyr::rename (risk_factor=2,lower=4,upper=5) %>%
+  filter (!is.na(Value))
+
+global_diet_riskfactor <- eu_diet %>% rbind (.,ea_diet) %>% rbind (.,sa_diet) %>%
+  rbind (.,sea_diet)
+
+pal <- wes_palette(13, name = "Darjeeling1", type = "continuous")
+global_diet_riskfactor_bar <- global_diet_riskfactor %>%
+  filter (Value>0) %>%
+  mutate(risk_factor = str_remove(risk_factor, "Diet ")) %>%
+  mutate(risk_factor = str_remove(risk_factor, " in")) %>%
+  mutate(risk_factor = str_remove(risk_factor, " polyunsaturated")) %>%
+  mutate(risk_factor = str_remove(risk_factor, " fatty acids")) %>%
+  mutate(risk_factor = str_remove(risk_factor, "sugar-")) %>%
+  ggplot (aes(x=Location,y=Value,fill=risk_factor))+
+  geom_bar (stat="Identity", colour="white") + theme_classic () +
+  scale_fill_manual(values= pal)+
+  xlab("Risk factor for CVD, 2021") + ylab("DALYS rate, per 100,000")+
+  coord_flip()+
+  # geom_text(aes(label=paste0(sprintf("%1.1f", Value))),
+  # position=position_stack(vjust=0.5),check_overlap = TRUE)+
+  theme(legend.position = "top", legend.title=element_blank())+
+  guides(fill=guide_legend(nrow=3))
+
+global_dalys_cvd_rf <- gridExtra::grid.arrange(global_dalys_cvddiab_forestplot,global_dalys_riskfactor_bar,ncol=2,widths=c(2,5))
+
+
+tiff(file="global_dlays_cvd_rf_diet_2021GBD_2.tiff",width=10, height=6, units="in", res=300)
+gridExtra::grid.arrange(global_dalys_cvd_rf,global_diet_riskfactor_bar)
+dev.off()
+
+
+
+### Figure 3A was recreated using the QGIS freeware using publicly available data (no R script available).
+# Please refer our pre-print https://www.medrxiv.org/content/10.1101/2024.05.14.24307259v2 for further details of the geospatial analysis
+
+
+
+#### Figure 3B, donut chart to illustrate proportion of people unable to afford healthy diet based on FAO, 2021
+data_donut_FAO<- read.csv ("FAO_2023_foodsecurity.csv",fileEncoding="UTF-8-BOM")
+data_donut_FAO<- data_donut_FAO %>% mutate (ymax=cumsum(prop))
+data_donut_FAO$ymin = c(0, head(data_donut_FAO$ymax, n=-1))
+
+tiff(file="donut_FAO_foodinsecure.tiff",
+     width=5, height=3, units="in", res=300)
+ggplot (data_donut_FAO,aes(ymax=ymax,ymin=ymin,xmax=2,xmin=-2,fill=region)) +
+  geom_rect(color="white", alpha=0.6) + coord_polar(theta="y",direction = -1) + xlim (c(-8,3)) + theme_void()+
+  scale_fill_manual(values=wes_palette(n=5, name="Darjeeling1"))
+dev.off()
+
+#### Figure 3C, donut chart to illustrate factors determining food choices in food-insecure households in 2020, Singapore
+# Based on the 2020 Hunger Report by Lien Centre for Social Innovation, Singapore
+data_donut_sg<- read.csv ("Lienreport_2020_SGhunger.csv",fileEncoding="UTF-8-BOM")
+data_donut_sg<- data_donut_sg %>% mutate (ymax=cumsum(prop))
+data_donut_sg$ymin = c(0, head(data_donut_sg$ymax, n=-1))
+
+tiff(file="donut_sg_foodinsecure.tiff",
+     width=5, height=3, units="in", res=300)
+ggplot (data_donut_sg,aes(ymax=ymax,ymin=ymin,xmax=2,xmin=-2,fill=reasons)) +
+  geom_rect(color="white", alpha=0.6) + coord_polar(theta="y",direction = -1) + xlim (c(-8,3)) + theme_void()+
+  scale_fill_manual(values=wes_palette(n=5, name="Zissou1"))
+dev.off()
+
+
+#### Figure 4A, Compare the odds of T2D for trans-ancestry PRS across 10 cohorts, from S Table 19, Mahajan et al 
+# DOI 10.1038/s41588-022-01058-3
+# Set dataframe
+mahajan_st19 <- data.frame(
+  ancestry =c("Africa","Africa","East Asia","East Asia","European", "European","Hispanic","Hispanic","South Asian","South Asian"),
+  study=c("WHI(AFR)","DDS/DDC","KBA(2)","SIMES","UKBB(EUR)","EPIC-INTERACT(2)","HCHS/SOL","MC(2)","PROMIS(1)","RHS"),
+  n=c(6940,2426,23515,1930,73138,8440,6674,1783,7447,1712),
+  log_or=c(0.695,0.535,1.154,0.682,1.010,0.963,1.104,0.641,0.765,1.131),
+  se=c(0.053,0.099,0.026,0.096,0.015,0.046,0.058,0.080,0.049,0.103)
+)
+
+mahajan_st19 <- mahajan_st19 %>% mutate (or=exp(log_or),lower_ci=exp(log_or -(1.96*se)), upper_ci=exp(log_or+(1.92*se)))
+
+# Make forest plot
+pdf(file="t2d_prs_global_mahajan.pdf",width=5, height=5)
+mahajan_st19 %>%
+  ggplot(aes(x=fct_reorder(study,ancestry),y=or, ymin=lower_ci, ymax=upper_ci,color=ancestry)) +
+  geom_pointrange(size=1) +
+  coord_flip()+
+  geom_hline(yintercept=1,linetype="dashed",color="grey")+
+  scale_color_manual(values=wes_palette(n=5, name="Darjeeling2"))+
+  xlab("") + ylab("OR (95%CI) T2D using trans-ancestry PRS")+theme_classic()+
+  theme(legend.position = "top",legend.title=element_blank(),legend.text = element_text(size=12.5))+
+  guides(color = guide_legend(nrow = 2))
+dev.off()
+
+
+#### Figure 4B Compare the prevalence of T2D across ethnicity in the HELIOS Study
+# The PRS distribution was reproduced from Figure 3 of the HELIOS Study protocol paper, with permission of Dr. Pritesh R. Jain
+# Please refer our pre-print https://www.medrxiv.org/content/10.1101/2024.05.14.24307259v2 for further details of the PRS analysis
+
+
+# Make bar charts of diabetes prevalence across ethnicity
+# This is reproduced from the submitted versions of https://www.thelancet.com/article/S2213-8587(24)00195-5/abstract
+pdf(file="t2d_prev_helios_ethnic.pdf",width=2, height=2)
+ggplot(disease_prop %>% filter (disease=="T2D"),aes(x=disease,y=Freq,fill=Ethnicity))+
+  geom_bar(position="dodge", stat="identity",color = "black")+
+  geom_text(aes(label = Freq, y = Freq + 3),
+            position = position_dodge(width = 0.9), size = 3)+theme_classic()+
+  labs(y = "Proportion (%)",x = "") + theme(legend.position="none")
+dev.off()
+  
+# Population attributable risk calculation
+prs_t2d <- read.csv ("PRS_disorders_all_std_append_3.csv",fileEncoding="UTF-8-BOM")
+prs_t2d <- prs_t2d %>% select (FREG8_Age,FREG7_Gender,Ethnicity,PRS_T2D,T2D)
+
+prs_t2d_c <- prs_t2d %>% filter (Ethnicity=="Chinese")
+prs_t2d_i <- prs_t2d %>% filter (Ethnicity=="Indian")
+prs_t2d_m <- prs_t2d %>% filter (Ethnicity=="Malay")
+
+par_t2d_prs_c <- glm (T2D~PRS_T2D+FREG8_Age+FREG7_Gender,data=prs_t2d_c,family=binomial()) 
+par_t2d_prs_i <- glm (T2D~PRS_T2D+FREG8_Age+FREG7_Gender,data=prs_t2d_i,family=binomial()) 
+par_t2d_prs_m <- glm (T2D~PRS_T2D+FREG8_Age+FREG7_Gender,data=prs_t2d_m,family=binomial()) 
+
+or_c <- summary (par_t2d_prs_c)
+or_i <- summary (par_t2d_prs_i)
+or_m <- summary (par_t2d_prs_m)
+
+par_t2d_prs <- list (par_t2d_prs_c,par_t2d_prs_i,par_t2d_prs_m)
+
+par_t2d_ethnic <-function(x){
+  y <- as.data.frame(confint(x)) %>% rownames_to_column() %>%
+    filter (rowname !="(Intercept)" & rowname !="FREG8_Age" & rowname !="FREG7_GenderM")
+  z <- as.data.frame(x[["coefficients"]]) %>% rownames_to_column() %>%
+    filter (rowname !="(Intercept)" & rowname !="FREG8_Age" & rowname !="FREG7_GenderM")
+  y <- merge (y,z,by="rowname") %>% dplyr::rename (predict=1,lower_ci=2,upper_ci=3,beta=4)%>%
+    mutate (lower_ci = exp(lower_ci), upper_ci=exp(upper_ci),odd=exp(beta)) %>% select (-beta)
+  return(y)
+}
+
+par_t2d_prs2 <- lapply(par_t2d_prs,par_t2d_ethnic)
+par_t2d_prs2 <- bind_rows(par_t2d_prs2, .id = "ethnic")
+par_t2d_prs2 <- par_t2d_prs2 %>% mutate (ethnic=c("C","I","M")) %>% select(-predict)
+
+par_c_tot <- (0.048*(2.191792-1))/((0.048*(2.191792-1))+1)
+par_i_tot <- (0.173*(1.915006-1))/((0.173*(1.915006-1))+1)
+par_m_tot <- (0.134*(1.681821-1))/((0.134*(1.681821-1))+1)
+
+# This means PAR_c = 5.4%, PAR_m = 8.3, PAR_i = 13.7
+
+# To illustrate contribution of PRS in explaining ethnic differences in disease burden
+t2d_burden <- data.frame(
+  ethnic=c("Chinese","Malay","Indian"),
+  prev=c(4.8,13.4,17.3),
+  paf=c(0.05411057,0.08371544,0.1366629)) %>%
+  mutate (prev_paf=prev*paf,diff=prev-prev_paf) %>% column_to_rownames("ethnic") %>% t() %>% as.data.frame() %>%
+  mutate (C_M = Malay-Chinese, C_I = Indian-Chinese )
+
+t2d_burden_donut<- t2d_burden %>% select (C_M,C_I) %>% t() %>% as.data.frame() %>% select (prev,prev_paf) %>%
+  mutate (prev_paf_prop=prev_paf/prev*100)
+
+C_M_par_prs <- tibble (par=c(10.02391,100-10.02391)) %>% mutate (ymax=cumsum(par),ymin=c(0,10.02391)) # see t2d_burden_donut
+C_I_par_prs <- tibble (par=c(16.83630,100-16.83630))%>% mutate (ymax=cumsum(par),ymin=c(0,16.83630))
+
+# make donut
+C_M_par_prs <- ggplot (C_M_par_prs,aes(ymax=ymax,ymin=ymin,xmax=2,xmin=-2,fill=factor(par))) +
+  geom_rect(color="black", alpha=0.6) + coord_polar(theta="y",direction = -1) + xlim (c(-8,2)) + theme_void() +
+  theme(legend.position = "none") +
+  annotate("text",label = paste0(5.4, "%"),fontface = "bold",color = "#B5DDD0",size = 9,x = -8,y = 0)+
+  scale_fill_manual(values = c("#B5DDD0", "grey90"))
+C_I_par_prs <-ggplot (C_I_par_prs,aes(ymax=ymax,ymin=ymin,xmax=2,xmin=-2,fill=factor(par))) +
+  geom_rect(color="black", alpha=0.6) + coord_polar(theta="y",direction = -1) + xlim (c(-8,2)) + theme_void() +
+  theme(legend.position = "none") +
+  annotate("text",label = paste0(13.9, "%"),fontface = "bold",color = "#BB94C4",size = 9,x = -8,y = 0)+
+  scale_fill_manual(values = c("#BB94C4", "grey90"))
+
+
+pdf(file="t2d_prs_par_ethnic.pdf",width=5, height=2) # need to match colour scheme with Pritesh
+gridExtra::grid.arrange(C_M_par_prs,C_I_par_prs,ncol=2)
+dev.off()
+
+#### Figure 5 and 6 were was constructed with BioRender.com
